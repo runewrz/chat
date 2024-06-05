@@ -64,7 +64,7 @@ public:
 
         //初始化发送socket，端口为8888
         send_socket = socket(AF_INET, SOCK_DGRAM, 0);
-        sockaddr_in send_addr{};
+        memset(&send_addr, 0, sizeof(send_addr));
         send_addr.sin_family = AF_INET;
         send_addr.sin_addr.s_addr = htonl(INADDR_ANY);
         send_addr.sin_port = htons(8888);
@@ -76,14 +76,14 @@ public:
         }
 
         //初始化组地址信息 使用239.255.255.250:1901组播
-        sockaddr_in group_addr{};
+        memset(&group_addr, 0, sizeof(group_addr));
         group_addr.sin_family = AF_INET;
         group_addr.sin_addr.s_addr = inet_addr("239.255.255.250");
         group_addr.sin_port = htons(1901);
 
         //初始化接收端口 1901
         recv_socket = socket(AF_INET, SOCK_DGRAM, 0);
-        sockaddr_in recv_addr{};
+        memset(&recv_addr, 0, sizeof(recv_addr));
         recv_addr.sin_family = AF_INET;
         recv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
         recv_addr.sin_port = htons(1901);
@@ -95,7 +95,7 @@ public:
         }
         
         //加入组播
-        ip_mreq mreq{};
+        memset(&mreq, 0, sizeof(mreq));
         mreq.imr_multiaddr.s_addr = inet_addr("239.255.255.250");
         mreq.imr_interface.s_addr = htonl(INADDR_ANY);
         ret = setsockopt(recv_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&mreq, sizeof(mreq));
@@ -103,7 +103,8 @@ public:
     }
     ~Client()
     {
-
+        setsockopt(recv_socket, IPPROTO_IP, IP_DROP_MEMBERSHIP, (char*)&mreq, sizeof(mreq));
+        WSACleanup();
     }
     void send(const std::string &msg)
     {
@@ -122,6 +123,8 @@ private:
     std::vector<Msg> history_msg; //记得补个锁
     std::vector<std::string> user_list; //记得补个锁
     SOCKET send_socket, recv_socket;
+    sockaddr_in send_addr, group_addr, recv_addr;
+    ip_mreq mreq;
     std::string name;
     int IP;
     void send_context(std::string msg, std::string name, int ip)
@@ -144,7 +147,7 @@ private:
     {
         char buf[1024];
         int length = 0;
-        struct sockaddr_in sender;
+        sockaddr_in sender{};
         socklen_t sender_len = sizeof(sender);
         while (true) {
             memset(buf, 0, sizeof(buf));

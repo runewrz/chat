@@ -112,7 +112,8 @@ public:
                     else if (vmsg[1] == "context")
                     {
                         std::lock_guard<std::mutex> lg(latch_msg_buf);
-                        msg_buf.push({ vmsg[2], vmsg[4] });
+                        if (std::stoi(vmsg[3]) != my_IP)
+                            msg_buf.push({ vmsg[2], vmsg[4] });
                     }
                     else if (vmsg[1] == "alive")
                     {
@@ -256,11 +257,12 @@ private:
 void chat_page(mychat &chat)
 {
     system("cls");
+    std::string exs;
     std::mutex print;
     std::thread check_new_user(
         [&]()
         {
-            while (1)
+            while (exs != "!b")
             {
                 std::lock_guard<std::mutex> lg(print);
                 auto user = chat.get_new_user();
@@ -271,12 +273,11 @@ void chat_page(mychat &chat)
             }
         }
     );
-    check_new_user.detach();
 
     std::thread check_off_user(
         [&]()
         {
-            while (1)
+            while (exs != "!b")
             {
                 std::lock_guard<std::mutex> lg(print);
                 auto user = chat.get_off_user();
@@ -287,37 +288,33 @@ void chat_page(mychat &chat)
             }
         }
     );
-    check_off_user.detach();
-
-    std::thread send_msg(
-        [&]()
-        {
-            while (1)
-            {
-                std::string buf;
-                std::getline(std::cin, buf);
-                chat.send(buf);
-            }
-        }
-    );
-    send_msg.detach();
     
     std::thread recv_msg(
         [&]()
         {
-            while (1)
+            while (exs != "!b")
             {
                 std::lock_guard<std::mutex> lg(print);
                 auto msg = chat.get_msg();
                 if (msg.name != "")
-                    std::cout << msg.name << ':' << msg.msg << '\n';
-                if (msg.msg == "!b")
                 {
-                    break;
+                    std::cout << msg.name << ':' << msg.msg << '\n';
+                    //exs = msg.msg;
                 }
             }
         }
     );
+
+    while (exs != "!b") //send msg
+    {
+        std::string buf;
+        std::getline(std::cin, buf);
+        exs = buf;
+        chat.send(buf);
+        if (exs == "!b") break;
+    }
+    check_new_user.join();
+    check_off_user.join();
     recv_msg.join();
 }
 
@@ -329,12 +326,12 @@ void user_list_page(mychat& chat)
         Sleep(2000);
         //std::lock_guard<std::mutex> lg(print);
         auto list = chat.get_user_list();
-        std::cout << "-----\n";
+        std::cout << "--------\n";
         for (auto& s : list)
         {
             std::cout << s.name << '\n';
         }
-        std::cout << "-----\n";
+        std::cout << "--------\n";
         std::string buf;
         std::cin >> buf;
         if (buf == "!b") break;

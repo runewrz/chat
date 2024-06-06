@@ -253,9 +253,9 @@ private:
     int my_IP;
 };
 
-int main()
+void chat_page(mychat &chat)
 {
-    mychat chat("userA");
+    system("cls");
     std::mutex print;
     std::thread check_new_user(
         [&]()
@@ -272,7 +272,7 @@ int main()
         }
     );
     check_new_user.detach();
-    
+
     std::thread check_off_user(
         [&]()
         {
@@ -289,6 +289,81 @@ int main()
     );
     check_off_user.detach();
 
+    std::thread send_msg(
+        [&]()
+        {
+            while (1)
+            {
+                std::string buf;
+                std::getline(std::cin, buf);
+                chat.send(buf);
+            }
+        }
+    );
+    send_msg.detach();
+    
+    std::thread recv_msg(
+        [&]()
+        {
+            while (1)
+            {
+                std::lock_guard<std::mutex> lg(print);
+                auto msg = chat.get_msg();
+                if (msg.name != "")
+                    std::cout << msg.name << ':' << msg.msg << '\n';
+                if (msg.msg == "!b")
+                {
+                    break;
+                }
+            }
+        }
+    );
+    recv_msg.join();
+}
+
+void user_list_page(mychat& chat)
+{
+    while (1)
+    {
+        system("cls");
+        Sleep(2000);
+        //std::lock_guard<std::mutex> lg(print);
+        auto list = chat.get_user_list();
+        std::cout << "-----\n";
+        for (auto& s : list)
+        {
+            std::cout << s.name << '\n';
+        }
+        std::cout << "-----\n";
+        std::string buf;
+        std::cin >> buf;
+        if (buf == "!b") break;
+    }
+}
+
+int main()
+{
+    system("cls");
+    std::string name;
+    std::cout << "input username:";
+    std::cin >> name;
+    mychat chat(name);
+    while (1)
+    {
+        system("cls");
+        std::cout << "1 chat\n2 get online user list\n";
+        int x;
+        std::cin >> x;
+        if (x == 1)
+        {
+            chat_page(chat);
+        }
+        else if (x == 2)
+        {
+            user_list_page(chat);
+        }
+
+    }
     /*std::thread get_list(
         [&]()
         {
@@ -307,34 +382,6 @@ int main()
         }
     );
     get_list.detach();*/
-
-    std::thread recv_msg(
-        [&]()
-        {
-            while (1)
-            {
-                std::lock_guard<std::mutex> lg(print);
-                auto msg = chat.get_msg();
-                if (msg.name != "")
-                    std::cout << msg.name << ':' << msg.msg << '\n';
-            }
-        }
-    );
-    recv_msg.detach();
-
-    std::thread send_msg(
-        [&]()
-        {
-            while (1)
-            {
-                std::string buf;
-                std::getline(std::cin, buf);
-                chat.send(buf);
-            }
-        }
-    );
-    send_msg.detach();
-    while (1);
     return 0;
 }
 

@@ -132,6 +132,7 @@ public:
                     {
                         std::lock_guard<std::mutex> lg(latch_user_list);
                         user_list.emplace_back(vmsg[2]);
+                        new_user.emplace(vmsg[2]);
                     }
                 }
             });
@@ -160,7 +161,14 @@ public:
     }
     std::string get_new_user()
     {
-
+        std::lock_guard<std::mutex> lg(latch_new_user);
+        std::string user;
+        if (!new_user.empty())
+        {
+            user = new_user.front();
+            new_user.pop();
+        }
+        return user;
     }
     Msg get_msg()
     {
@@ -175,8 +183,9 @@ public:
     }
 private:
     std::queue<Msg> msg_buf;
+    std::queue<std::string> new_user, off_user;
     std::vector<std::string> user_list;
-    std::mutex latch_msg_buf, latch_user_list;
+    std::mutex latch_msg_buf, latch_user_list, latch_new_user;
     SOCKET send_socket, recv_socket;
     sockaddr_in group_addr, recv_addr;
     ip_mreq mreq;
@@ -188,22 +197,55 @@ private:
 int main()
 {
     mychat chat("userA");
-    while (1)
-    {
-        auto msg = chat.get_msg();
-        if (msg.msg != "")
+    std::mutex print;
+    /*std::thread check_new_user(
+        [&]()
         {
-            std::cout << "msg:\n";
-            std::cout << msg.name << ":" << msg.msg << '\n';
+            while (1)
+            {
+                std::lock_guard<std::mutex> lg(print);
+                auto user = chat.get_new_user();
+                if (user != "")
+                {
+                    std::cout << "new user:" << user << '\n';
+                }
+            }
         }
-        auto user = chat.get_user_list();
-        std::cout << "----\n";
-        for (auto& s : user)
+    );
+    check_new_user.detach();*/
+
+    std::thread get_list(
+        [&]()
         {
-            std::cout << s << '\n';
+            while (1)
+            {
+                std::lock_guard<std::mutex> lg(print);
+                auto list = chat.get_user_list();
+                std::cout << "-----\n";
+                for (auto& s : list)
+                {
+                    std::cout << s << '\n';
+                }
+                std::cout << "-----\n";
+            }
         }
-        std::cout << "----\n";
-    }
+    );
+    get_list.detach();
+
+    /*std::thread recv_msg(
+        [&]()
+        {
+            while (1)
+            {
+                std::lock_guard<std::mutex> lg(print);
+                auto msg = chat.get_msg();
+                if (msg.name != "")
+                    std::cout << msg.name << ':' << msg.msg << '\n';
+            }
+        }
+    );
+    recv_msg.join();*/
+    while (1);
     return 0;
 }
 

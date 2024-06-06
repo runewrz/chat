@@ -310,8 +310,8 @@ void chat_page(mychat &chat)
         std::string buf;
         std::getline(std::cin, buf);
         exs = buf;
-        chat.send(buf);
         if (exs == "!b") break;
+        if (buf != "") chat.send(buf);
     }
     check_new_user.join();
     check_off_user.join();
@@ -320,22 +320,30 @@ void chat_page(mychat &chat)
 
 void user_list_page(mychat& chat)
 {
-    while (1)
-    {
-        system("cls");
-        Sleep(2000);
-        //std::lock_guard<std::mutex> lg(print);
-        auto list = chat.get_user_list();
-        std::cout << "--------\n";
-        for (auto& s : list)
+    std::string exs;
+    std::thread show_list(
+        [&]()
         {
-            std::cout << s.name << '\n';
+            while (exs != "!b")
+            {
+                system("cls");
+                //std::lock_guard<std::mutex> lg(print);
+                auto list = chat.get_user_list();
+                std::cout << "--------\n";
+                for (auto& s : list)
+                {
+                    std::cout << s.name << '\n';
+                }
+                std::cout << "--------\n";
+                Sleep(2000);
+            }
         }
-        std::cout << "--------\n";
-        std::string buf;
-        std::cin >> buf;
-        if (buf == "!b") break;
+    );
+    while (exs != "!b")
+    {
+        std::getline(std::cin, exs);
     }
+    show_list.join();
 }
 
 int main()

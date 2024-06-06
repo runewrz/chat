@@ -9,47 +9,6 @@
 #include <queue>
 #pragma comment(lib, "Ws2_32.lib")
 
-/*
-constexpr auto SERVERPORT = 1900;
-constexpr auto SSDP_GROUP = "239.255.255.250";
-const char buff[] =
-"M-SEARCH * HTTP/1.1\r\n"
-"HOST: 239.255.255.250:1900\r\n"
-"MAN: \"ssdp:discover\"\r\n"
-"MX: 3\r\n"
-"ST: ssdp:all\r\n"
-"\r\n";
-*/
-//自定义报文类型
-/*
-* mychat
-* discover
-* name
-* IP
-*/
-
-/*
-* mychat
-* context
-* name
-* IP
-* text
-*/
-
-/*
-* mychat
-* alive
-* name
-* IP
-*/
-
-/*
-* mychat
-* bye
-* name
-* IP
-*/
-
 class mychat
 {
 public:
@@ -65,6 +24,17 @@ public:
         WSADATA wsaData;
         WSAStartup(MAKEWORD(2, 2), &wsaData);
 
+        //获取本机ip
+        char hostname[255]{};
+        gethostname(hostname, sizeof(hostname));
+        PHOSTENT hostinfo = gethostbyname(hostname);
+        while (*(hostinfo->h_addr_list) != NULL)
+        {
+            auto nip = *(struct in_addr*)*hostinfo->h_addr_list;
+            my_IP = nip.S_un.S_addr;
+            hostinfo->h_addr_list++;
+        }
+
         send_socket = socket(AF_INET, SOCK_DGRAM, 0);
 
         //239.255.255.250:1901组播
@@ -77,7 +47,7 @@ public:
         recv_socket = socket(AF_INET, SOCK_DGRAM, 0);
         memset(&recv_addr, 0, sizeof(recv_addr));
         recv_addr.sin_family = AF_INET;
-        recv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        recv_addr.sin_addr.s_addr = my_IP;
         recv_addr.sin_port = htons(1901);
 
         int ret = bind(recv_socket, (struct sockaddr*)&recv_addr, sizeof(recv_addr));
@@ -91,9 +61,12 @@ public:
         mreq.imr_multiaddr.s_addr = inet_addr("239.255.255.250");
         mreq.imr_interface.s_addr = htonl(INADDR_ANY);
         ret = setsockopt(recv_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&mreq, sizeof(mreq));
-        
+
+        //在线
+        std::string buf = "mychat\nonline\n" + name + "\n" + std::to_string(my_IP) + "\n";
+        sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
     }
-    ~Client()
+    ~mychat()
     {
         setsockopt(recv_socket, IPPROTO_IP, IP_DROP_MEMBERSHIP, (char*)&mreq, sizeof(mreq));
         WSACleanup();
@@ -107,7 +80,8 @@ public:
                     sockaddr_in sender{};
                     socklen_t sender_len = sizeof(sender);
                     recvfrom(recv_socket, buf, sizeof(buf), 0, (struct sockaddr*)&sender, &sender_len);
-                    auto get_vec = [](const std::string& s)
+
+                    auto get_vec = [](const std::string& s) //解析收到的报文
                         {
                             int st = 0;
                             std::vector<std::string> vec;
@@ -121,8 +95,9 @@ public:
                             }
                             return vec;
                         };
+
                     std::vector<std::string> vmsg = get_vec(std::string(buf));
-                    if (!vmsg.size() || vmsg[0] != "mychat") continue;
+                    if (!vmsg.size() || vmsg[0] != "mychat") continue; //根据收到的报文类别分类响应
                     if (vmsg[1] == "discover")
                     {
                         std::string buf = "mychat\nalive\n" + name + "\n" + std::to_string(my_IP) + "\n";
@@ -155,6 +130,11 @@ public:
                             user_list.erase(it);
                         }
                     }
+                    else if (vmsg[1] == "online")
+                    {
+                        std::lock_guard<std::mutex> lg(latch_user_list);
+                        user_list.emplace_back(vmsg[2]);
+                    }
                 }
             };
         std::thread recv_t(receive);
@@ -172,6 +152,10 @@ public:
         sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
         Sleep(2);
         return user_list;
+    }
+    std::string get_online_user()
+    {
+
     }
     Msg get_msg()
     {

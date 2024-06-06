@@ -1,29 +1,28 @@
 //自定义报文类型
-/*
-* mychat
-* discover
-* name
-* IP
-*/
 
-/*
-* mychat
-* context
-* name
-* IP
-* text
-*/
+mychat
+discover
+name
+IP
 
-/*
-* mychat
-* alive
-* name
-* IP
-*/
+mychat
+context
+name
+IP
+text
 
-/*
-* mychat
-* bye
-* name
-* IP
-*/
+mychat
+alive
+name
+IP
+
+mychat
+bye
+name
+IP
+
+mychat
+online
+name
+IP
+

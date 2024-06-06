@@ -5,6 +5,8 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <thread>
+#include <mutex>
+#include <queue>
 #pragma comment(lib, "Ws2_32.lib")
 
 /*
@@ -48,40 +50,30 @@ const char buff[] =
 * IP
 */
 
-class Client
+class mychat
 {
 public:
     struct Msg
     {
         //发送人，内容
         std::string name, msg;
+        Msg(std::string name_ = "", std::string msg_ = "") :name(name_), msg(msg_) {}
     };
-    Client(std::string name_)
+    mychat(std::string name_ = "unname")
     {
         name = name_;
         WSADATA wsaData;
         WSAStartup(MAKEWORD(2, 2), &wsaData);
 
-        //初始化发送socket，端口为8888
         send_socket = socket(AF_INET, SOCK_DGRAM, 0);
-        memset(&send_addr, 0, sizeof(send_addr));
-        send_addr.sin_family = AF_INET;
-        send_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-        send_addr.sin_port = htons(8888);
 
-        int ret = bind(send_socket, (struct sockaddr*)&send_addr, sizeof(send_addr));
-        if (ret == -1)
-        {
-            perror("Bind send socket failed !");
-        }
-
-        //初始化组地址信息 使用239.255.255.250:1901组播
+        //239.255.255.250:1901组播
         memset(&group_addr, 0, sizeof(group_addr));
         group_addr.sin_family = AF_INET;
         group_addr.sin_addr.s_addr = inet_addr("239.255.255.250");
         group_addr.sin_port = htons(1901);
 
-        //初始化接收端口 1901
+        //接收端口 1901
         recv_socket = socket(AF_INET, SOCK_DGRAM, 0);
         memset(&recv_addr, 0, sizeof(recv_addr));
         recv_addr.sin_family = AF_INET;
@@ -99,95 +91,108 @@ public:
         mreq.imr_multiaddr.s_addr = inet_addr("239.255.255.250");
         mreq.imr_interface.s_addr = htonl(INADDR_ANY);
         ret = setsockopt(recv_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&mreq, sizeof(mreq));
-        std::thread recv_t(recv_socket);
+        
     }
     ~Client()
     {
         setsockopt(recv_socket, IPPROTO_IP, IP_DROP_MEMBERSHIP, (char*)&mreq, sizeof(mreq));
         WSACleanup();
     }
+    void start_receive()
+    {
+        auto receive = [&]()->void
+            {
+                while (true) {
+                    char buf[1024]{};
+                    sockaddr_in sender{};
+                    socklen_t sender_len = sizeof(sender);
+                    recvfrom(recv_socket, buf, sizeof(buf), 0, (struct sockaddr*)&sender, &sender_len);
+                    auto get_vec = [](const std::string& s)
+                        {
+                            int st = 0;
+                            std::vector<std::string> vec;
+                            for (int i = 0; i < s.size(); i++)
+                            {
+                                if (s[i] == '\n')
+                                {
+                                    vec.emplace_back(s.substr(st, i - st));
+                                    st = i + 1;
+                                }
+                            }
+                            return vec;
+                        };
+                    std::vector<std::string> vmsg = get_vec(std::string(buf));
+                    if (!vmsg.size() || vmsg[0] != "mychat") continue;
+                    if (vmsg[1] == "discover")
+                    {
+                        std::string buf = "mychat\nalive\n" + name + "\n" + std::to_string(my_IP) + "\n";
+                        sockaddr_in recv_add{};
+                        recv_addr.sin_family = AF_INET;
+                        recv_addr.sin_addr.s_addr = std::stoi(vmsg[3]);
+                        recv_addr.sin_port = htons(1901);
+                        int length = sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&recv_addr, sizeof(recv_addr));
+                    }
+                    else if (vmsg[1] == "context")
+                    {
+                        std::lock_guard<std::mutex> lg(latch_msg_buf);
+                        msg_buf.emplace(vmsg[2], vmsg[4]);
+                    }
+                    else if (vmsg[1] == "alive")
+                    {
+                        std::lock_guard<std::mutex> lg(latch_user_list);
+                        auto it = std::find(user_list.begin(), user_list.end(), vmsg[2]);
+                        if (it == user_list.end())
+                        {
+                            user_list.emplace_back(vmsg[2]);
+                        }
+                    }
+                    else if (vmsg[1] == "bye")
+                    {
+                        std::lock_guard<std::mutex> lg(latch_user_list);
+                        auto it = std::find(user_list.begin(), user_list.end(), vmsg[2]);
+                        if (it != user_list.end())
+                        {
+                            user_list.erase(it);
+                        }
+                    }
+                }
+            };
+        std::thread recv_t(receive);
+    }
     void send(const std::string &msg)
     {
-        send_context(msg, name, IP);
+        std::string buf = "mychat\ncontext\n" + name + "\n" + std::to_string(my_IP) + "\n" + msg + "\n";
+        sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
     }
     std::vector<std::string> get_user_list()
     {
-        send_discover(name, IP);
+        std::lock_guard<std::mutex> lg(latch_msg_buf);
+        std::string buf = "mychat\ndiscover\n" + name + "\n" + std::to_string(my_IP) + "\n";
+        user_list.clear();
+        sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
+        Sleep(2);
         return user_list;
     }
-    std::vector<Msg> get_history_msg()
+    Msg get_msg()
     {
-        return history_msg;
+        std::lock_guard<std::mutex> lg(latch_msg_buf);
+        Msg msg;
+        if (!msg_buf.empty())
+        {
+            msg = msg_buf.front();
+            msg_buf.pop();
+        }
+        return msg;
     }
 private:
-    std::vector<Msg> history_msg; //记得补个锁
-    std::vector<std::string> user_list; //记得补个锁
+    std::queue<Msg> msg_buf;
+    std::vector<std::string> user_list;
+    std::mutex latch_msg_buf, latch_user_list;
     SOCKET send_socket, recv_socket;
-    sockaddr_in send_addr, group_addr, recv_addr;
+    sockaddr_in group_addr, recv_addr;
     ip_mreq mreq;
     std::string name;
-    int IP;
-    void send_context(std::string msg, std::string name, int ip)
-    {
-
-    }
-    void send_alive(std::string name, int ip)
-    {
-
-    }
-    void send_discover(std::string name, int ip)
-    {
-
-    }
-    void send_bye(std::string name, int ip)
-    {
-
-    }
-    void recv_socket()
-    {
-        char buf[1024];
-        int length = 0;
-        sockaddr_in sender{};
-        socklen_t sender_len = sizeof(sender);
-        while (true) {
-            memset(buf, 0, sizeof(buf));
-            length = recvfrom(recv_socket, buf, sizeof(buf), 0, (struct sockaddr*)&sender, &sender_len);
-            buf[length] = '\0';
-            //printf("%s %d : %s\n", inet_ntoa(sender.sin_addr), ntohs(sender.sin_port), buf);
-            auto get_vec = [](const std::string & s)
-            {
-                int st = 0;
-                std::vector<std::string> vec;
-                for (int i = 0; i < s.size(); i++)
-                {
-                    if (s[i] == '\n')
-                    {
-                        vec.emplace_back(s.substr(st, i - st));
-                        st = i + 1;
-                    }
-                }
-                return vec;
-            };
-            std::vector<std::string> vmsg = get_vec(std::string(buf));
-            if (!vmsg.size() || vmsg[0] != "mychat") continue;
-            if (vmsg[1] == "discover")
-            {
-                send_alive(name, IP);
-            }
-            else if (vmsg[1] == "context")
-            {
-                history_msg.emplace_back(vmsg[2], vmsg[4]);
-            }
-            else if (vmsg[1] == "alive")
-            {
-                send_alive(name, IP);
-            }
-            else if (vmsg[1] == "bye")
-            {
-                send_bye(name, IP);
-            }
-        }
-    }
+    int my_IP;
 };
 
 int main()

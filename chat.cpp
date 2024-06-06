@@ -159,7 +159,7 @@ public:
                         sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&recv_addr, sizeof(recv_addr));
                     }
                     lg.unlock();
-                    Sleep(5000);
+                    Sleep(3000);
                     std::vector<User> new_list;
                     lg.lock();
                     for (auto& user : user_list)
@@ -179,11 +179,12 @@ public:
             }
         );
         check_user.detach();
+        std::string buf;
         // 在线
-        //std::string buf = "mychat\nalive\n" + name + "\n" + std::to_string(my_IP) + "\n";
-        //sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
+        buf = "mychat\nalive\n" + name + "\n" + std::to_string(my_IP) + "\n";
+        sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
         //发现
-        std::string buf = "mychat\ndiscover\n" + name + "\n" + std::to_string(my_IP) + "\n";
+        buf = "mychat\ndiscover\n" + name + "\n" + std::to_string(my_IP) + "\n";
         sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
     }
     ~mychat()
@@ -288,7 +289,7 @@ int main()
     );
     check_off_user.detach();
 
-    std::thread get_list(
+    /*std::thread get_list(
         [&]()
         {
             while (1)
@@ -305,9 +306,9 @@ int main()
             }
         }
     );
-    get_list.detach();
+    get_list.detach();*/
 
-    /*std::thread recv_msg(
+    std::thread recv_msg(
         [&]()
         {
             while (1)
@@ -319,7 +320,20 @@ int main()
             }
         }
     );
-    recv_msg.detach();*/
+    recv_msg.detach();
+
+    std::thread send_msg(
+        [&]()
+        {
+            while (1)
+            {
+                std::string buf;
+                std::getline(std::cin, buf);
+                chat.send(buf);
+            }
+        }
+    );
+    send_msg.detach();
     while (1);
     return 0;
 }

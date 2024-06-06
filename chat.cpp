@@ -12,6 +12,17 @@
 class mychat
 {
 public:
+    struct User
+    {
+        int IP;
+        std::string name;
+        bool is_alive;
+        bool operator ==(const User& rhs)
+        {
+            return IP == rhs.IP && name == rhs.name;
+        }
+        User(int IP_ = 0, std::string name_ = "", bool is_alive_ = true) : IP(IP_), name(name_), is_alive(is_alive_){}
+    };
     struct Msg
     {
         //发送人，内容
@@ -64,7 +75,7 @@ public:
         ret = setsockopt(recv_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&mreq, sizeof(mreq));
 
         //在线
-        std::string buf = "mychat\nonline\n" + name + "\n" + std::to_string(my_IP) + "\n";
+        std::string buf = "mychat\nalive\n" + name + "\n" + std::to_string(my_IP) + "\n";
         sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
 
         buf = "mychat\ndiscover\n" + name + "\n" + std::to_string(my_IP) + "\n";
@@ -87,7 +98,7 @@ public:
                             {
                                 if (s[i] == '\n')
                                 {
-                                    vec.emplace_back(s.substr(st, i - st));
+                                    vec.push_back(s.substr(st, i - st));
                                     st = i + 1;
                                 }
                             }
@@ -108,35 +119,74 @@ public:
                     else if (vmsg[1] == "context")
                     {
                         std::lock_guard<std::mutex> lg(latch_msg_buf);
-                        msg_buf.emplace(vmsg[2], vmsg[4]);
+                        msg_buf.push({ vmsg[2], vmsg[4] });
                     }
                     else if (vmsg[1] == "alive")
                     {
                         std::lock_guard<std::mutex> lg(latch_user_list);
-                        auto it = std::find(user_list.begin(), user_list.end(), vmsg[2]);
+                        auto it = std::find(user_list.begin(), user_list.end(), User(std::stoi(vmsg[3]), vmsg[2]));
                         if (it == user_list.end())
                         {
-                            user_list.emplace_back(vmsg[2]);
+                            user_list.push_back({ std::stoi(vmsg[3]), vmsg[2] });
+                            new_user.push({ std::stoi(vmsg[3]), vmsg[2] });
+                        }
+                        else
+                        {
+                            it->is_alive = true;
                         }
                     }
                     else if (vmsg[1] == "bye")
                     {
                         std::lock_guard<std::mutex> lg(latch_user_list);
-                        auto it = std::find(user_list.begin(), user_list.end(), vmsg[2]);
+                        std::lock_guard<std::mutex> lg2(latch_off_user);
+                        auto it = std::find(user_list.begin(), user_list.end(), User(std::stoi(vmsg[3]), vmsg[2]));
                         if (it != user_list.end())
                         {
+                            off_user.push(*it);
                             user_list.erase(it);
                         }
-                    }
-                    else if (vmsg[1] == "online")
-                    {
-                        std::lock_guard<std::mutex> lg(latch_user_list);
-                        user_list.emplace_back(vmsg[2]);
-                        new_user.emplace(vmsg[2]);
                     }
                 }
             });
         recv_t.detach();
+        std::thread check_user(
+            [&]()->void
+            {
+                while (1)
+                {
+                    Sleep(4000);
+                    std::unique_lock<std::mutex> lg(latch_user_list);
+                    for (auto& user : user_list)
+                    {
+                        user.is_alive = false;
+                        std::string buf = "mychat\ndiscover\n" + name + "\n" + std::to_string(my_IP) + "\n";
+                        sockaddr_in recv_add{};
+                        recv_addr.sin_family = AF_INET;
+                        recv_addr.sin_addr.s_addr = user.IP;
+                        recv_addr.sin_port = htons(1901);
+                        sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&recv_addr, sizeof(recv_addr));
+                    }
+                    lg.unlock();
+                    Sleep(4000);
+                    std::vector<User> new_list;
+                    lg.lock();
+                    for (auto& user : user_list)
+                    {
+                        if (user.is_alive)
+                        {
+                            new_list.push_back(user);
+                        }
+                        else
+                        {
+                            std::lock_guard<std::mutex> lg(latch_off_user);
+                            off_user.push(user);
+                        }
+                    }
+                    user_list = std::move(new_list);
+                }
+            }
+        );
+        check_user.detach();
     }
     ~mychat()
     {
@@ -150,23 +200,34 @@ public:
         std::string buf = "mychat\ncontext\n" + name + "\n" + std::to_string(my_IP) + "\n" + msg + "\n";
         sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
     }
-    std::vector<std::string> get_user_list()
+    std::vector<User> get_user_list()
     {
-        std::lock_guard<std::mutex> lg(latch_msg_buf);
-        std::string buf = "mychat\ndiscover\n" + name + "\n" + std::to_string(my_IP) + "\n";
-        user_list.clear();
-        sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
-        Sleep(5000);
+        std::lock_guard<std::mutex> lg(latch_user_list);
+        //std::string buf = "mychat\ndiscover\n" + name + "\n" + std::to_string(my_IP) + "\n";
+        //user_list.clear();
+        //sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
+        //Sleep(5000);
         return user_list;
     }
-    std::string get_new_user()
+    User get_new_user()
     {
         std::lock_guard<std::mutex> lg(latch_new_user);
-        std::string user;
+        User user;
         if (!new_user.empty())
         {
             user = new_user.front();
             new_user.pop();
+        }
+        return user;
+    }
+    User get_off_user()
+    {
+        std::lock_guard<std::mutex> lg(latch_off_user);
+        User user;
+        if (!off_user.empty())
+        {
+            user = off_user.front();
+            off_user.pop();
         }
         return user;
     }
@@ -183,38 +244,53 @@ public:
     }
 private:
     std::queue<Msg> msg_buf;
-    std::queue<std::string> new_user, off_user;
-    std::vector<std::string> user_list;
-    std::mutex latch_msg_buf, latch_user_list, latch_new_user;
+    std::queue<User> new_user, off_user;
+    std::vector<User> user_list;
+    std::mutex latch_msg_buf, latch_user_list, latch_new_user, latch_off_user;
     SOCKET send_socket, recv_socket;
     sockaddr_in group_addr, recv_addr;
     ip_mreq mreq;
     std::string name;
     int my_IP;
-    std::thread recv_t;
 };
 
 int main()
 {
     mychat chat("userA");
     std::mutex print;
-    /*std::thread check_new_user(
+    std::thread check_new_user(
         [&]()
         {
             while (1)
             {
                 std::lock_guard<std::mutex> lg(print);
                 auto user = chat.get_new_user();
-                if (user != "")
+                if (user.name != "")
                 {
-                    std::cout << "new user:" << user << '\n';
+                    std::cout << "new user:" << user.name << '\n';
                 }
             }
         }
     );
-    check_new_user.detach();*/
+    check_new_user.detach();
+    
+    std::thread check_off_user(
+        [&]()
+        {
+            while (1)
+            {
+                std::lock_guard<std::mutex> lg(print);
+                auto user = chat.get_off_user();
+                if (user.name != "")
+                {
+                    std::cout << "offline user:" << user.name << '\n';
+                }
+            }
+        }
+    );
+    check_off_user.detach();
 
-    std::thread get_list(
+    /*std::thread get_list(
         [&]()
         {
             while (1)
@@ -230,9 +306,9 @@ int main()
             }
         }
     );
-    get_list.detach();
+    get_list.detach();*/
 
-    /*std::thread recv_msg(
+    std::thread recv_msg(
         [&]()
         {
             while (1)
@@ -244,7 +320,7 @@ int main()
             }
         }
     );
-    recv_msg.join();*/
+    recv_msg.detach();
     while (1);
     return 0;
 }

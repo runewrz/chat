@@ -21,8 +21,4 @@ bye
 name
 IP
 
-mychat
-online
-name
-IP
 

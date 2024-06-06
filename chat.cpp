@@ -74,13 +74,6 @@ public:
         mreq.imr_interface.s_addr = htonl(INADDR_ANY);
         ret = setsockopt(recv_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&mreq, sizeof(mreq));
 
-        //在线
-        std::string buf = "mychat\nalive\n" + name + "\n" + std::to_string(my_IP) + "\n";
-        sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
-
-        buf = "mychat\ndiscover\n" + name + "\n" + std::to_string(my_IP) + "\n";
-        sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
-
         std::thread recv_t([&]()->void //接受并处理组播信息
             {
                 while (true) {
@@ -154,7 +147,6 @@ public:
             {
                 while (1)
                 {
-                    Sleep(4000);
                     std::unique_lock<std::mutex> lg(latch_user_list);
                     for (auto& user : user_list)
                     {
@@ -167,7 +159,7 @@ public:
                         sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&recv_addr, sizeof(recv_addr));
                     }
                     lg.unlock();
-                    Sleep(4000);
+                    Sleep(5000);
                     std::vector<User> new_list;
                     lg.lock();
                     for (auto& user : user_list)
@@ -187,6 +179,12 @@ public:
             }
         );
         check_user.detach();
+        // 在线
+        //std::string buf = "mychat\nalive\n" + name + "\n" + std::to_string(my_IP) + "\n";
+        //sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
+        //发现
+        std::string buf = "mychat\ndiscover\n" + name + "\n" + std::to_string(my_IP) + "\n";
+        sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
     }
     ~mychat()
     {
@@ -290,25 +288,26 @@ int main()
     );
     check_off_user.detach();
 
-    /*std::thread get_list(
+    std::thread get_list(
         [&]()
         {
             while (1)
             {
+                Sleep(2000);
                 std::lock_guard<std::mutex> lg(print);
                 auto list = chat.get_user_list();
                 std::cout << "-----\n";
                 for (auto& s : list)
                 {
-                    std::cout << s << '\n';
+                    std::cout << s.name << '\n';
                 }
                 std::cout << "-----\n";
             }
         }
     );
-    get_list.detach();*/
+    get_list.detach();
 
-    std::thread recv_msg(
+    /*std::thread recv_msg(
         [&]()
         {
             while (1)
@@ -320,7 +319,7 @@ int main()
             }
         }
     );
-    recv_msg.detach();
+    recv_msg.detach();*/
     while (1);
     return 0;
 }

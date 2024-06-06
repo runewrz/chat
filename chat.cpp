@@ -351,7 +351,7 @@ int main()
     while (1)
     {
         system("cls");
-        std::cout << "1 chat\n2 get online user list\n";
+        std::cout << "1 chat\n2 get online user list\n3 exit\n";
         int x;
         std::cin >> x;
         if (x == 1)
@@ -362,7 +362,8 @@ int main()
         {
             user_list_page(chat);
         }
-
+        else if (x == 3)
+            break;
     }
     /*std::thread get_list(
         [&]()

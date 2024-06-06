@@ -34,6 +34,7 @@ public:
             my_IP = nip.S_un.S_addr;
             hostinfo->h_addr_list++;
         }
+        printf("IP = %d.%d.%d.%d\n", my_IP & 255, (my_IP >> 8) & 255, (my_IP >> 16) & 255, (my_IP >> 24) & 255);
 
         send_socket = socket(AF_INET, SOCK_DGRAM, 0);
 
@@ -65,21 +66,18 @@ public:
         //在线
         std::string buf = "mychat\nonline\n" + name + "\n" + std::to_string(my_IP) + "\n";
         sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
-    }
-    ~mychat()
-    {
-        setsockopt(recv_socket, IPPROTO_IP, IP_DROP_MEMBERSHIP, (char*)&mreq, sizeof(mreq));
-        WSACleanup();
-    }
-    void start_receive()
-    {
-        auto receive = [&]()->void
+
+        buf = "mychat\ndiscover\n" + name + "\n" + std::to_string(my_IP) + "\n";
+        sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
+
+        std::thread recv_t([&]()->void //接受并处理组播信息
             {
                 while (true) {
                     char buf[1024]{};
                     sockaddr_in sender{};
                     socklen_t sender_len = sizeof(sender);
                     recvfrom(recv_socket, buf, sizeof(buf), 0, (struct sockaddr*)&sender, &sender_len);
+                    //printf("receive msg:%s\n", buf);
 
                     auto get_vec = [](const std::string& s) //解析收到的报文
                         {
@@ -136,8 +134,15 @@ public:
                         user_list.emplace_back(vmsg[2]);
                     }
                 }
-            };
-        std::thread recv_t(receive);
+            });
+        recv_t.detach();
+    }
+    ~mychat()
+    {
+        std::string buf = "mychat\nbye\n" + name + "\n" + std::to_string(my_IP) + "\n";
+        sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
+        setsockopt(recv_socket, IPPROTO_IP, IP_DROP_MEMBERSHIP, (char*)&mreq, sizeof(mreq));
+        WSACleanup();
     }
     void send(const std::string &msg)
     {
@@ -150,10 +155,10 @@ public:
         std::string buf = "mychat\ndiscover\n" + name + "\n" + std::to_string(my_IP) + "\n";
         user_list.clear();
         sendto(send_socket, buf.c_str(), buf.size(), 0, (struct sockaddr*)&group_addr, sizeof(group_addr));
-        Sleep(2);
+        Sleep(5000);
         return user_list;
     }
-    std::string get_online_user()
+    std::string get_new_user()
     {
 
     }
@@ -177,10 +182,28 @@ private:
     ip_mreq mreq;
     std::string name;
     int my_IP;
+    std::thread recv_t;
 };
 
 int main()
 {
+    mychat chat("userA");
+    while (1)
+    {
+        auto msg = chat.get_msg();
+        if (msg.msg != "")
+        {
+            std::cout << "msg:\n";
+            std::cout << msg.name << ":" << msg.msg << '\n';
+        }
+        auto user = chat.get_user_list();
+        std::cout << "----\n";
+        for (auto& s : user)
+        {
+            std::cout << s << '\n';
+        }
+        std::cout << "----\n";
+    }
     return 0;
 }
 

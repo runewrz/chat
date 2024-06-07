@@ -45,7 +45,7 @@ public:
             my_IP = nip.S_un.S_addr;
             hostinfo->h_addr_list++;
         }
-        printf("IP = %d.%d.%d.%d\n", my_IP & 255, (my_IP >> 8) & 255, (my_IP >> 16) & 255, (my_IP >> 24) & 255);
+        //printf("IP = %d.%d.%d.%d\n", my_IP & 255, (my_IP >> 8) & 255, (my_IP >> 16) & 255, (my_IP >> 24) & 255);
 
         send_socket = socket(AF_INET, SOCK_DGRAM, 0);
 
@@ -73,6 +73,10 @@ public:
         mreq.imr_multiaddr.s_addr = inet_addr("239.255.255.250");
         mreq.imr_interface.s_addr = htonl(INADDR_ANY);
         ret = setsockopt(recv_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&mreq, sizeof(mreq));
+        if (ret == -1)
+        {
+            perror("not in the group!");
+        }
 
         std::thread recv_t([&]()->void //接受并处理组播信息
             {
